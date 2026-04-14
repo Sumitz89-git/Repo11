@@ -165,6 +165,9 @@ function AuthGate() {
           <div style={{ fontSize:11, color:"var(--text-sec,#A1A1AA)", marginTop:3, fontFamily:"monospace" }}>
             AI Exam Prep · TPAD01
           </div>
+          <div style={{ fontSize:10, color:"var(--accent,#6366F1)", marginTop:4, fontFamily:"monospace", fontWeight:700, letterSpacing:"0.06em", opacity:0.8 }}>
+            by HumTere
+          </div>
         </div>
 
         {/* Mode tabs */}
@@ -4339,13 +4342,14 @@ function AppInner() {
     fetchStopRef.current = false;
     fetchStatsRef.current = {batches:0,received:0,added:0};
     setFetchRunning(true); setFetchDone(false); setFetchLog([]); setFetchStats({batches:0,received:0,added:0}); setShowFetchWindow(true);
-    const rc = getActiveRateConfig();
+    let rc = getActiveRateConfig(); // re-read each iteration
     const allDomains = CERT_CONFIG.domains.map(d=>d.id);
     const batchCount = Math.ceil(target/rc.batchSize);
     appendFetchLog(`🚀 Fetching ${target} questions · ${batchCount} call${batchCount>1?"s":""} of up to ${rc.batchSize} each`, "done");
     appendFetchLog(`📥 Mode: ${addToQbase?"Fill qBase":"Cache Only"}`, addToQbase?"ok":"info");
     let remaining = target, batchNum = 0;
     while (remaining > 0 && !fetchStopRef.current) {
+      rc = getActiveRateConfig(); // 🔄 live reload — Admin changes respected mid-run
       const thisBatch = Math.min(remaining, rc.batchSize); batchNum++;
       appendFetchLog(`▶ Batch ${batchNum}/${batchCount} — requesting ${thisBatch} Qs…`, "info");
       const callStart = Date.now();
@@ -4440,6 +4444,9 @@ function AppInner() {
                 <div className="logo-sub">AI Exam Prep</div>
               </div>
               <div className="cert-badge">{CERT_CONFIG.id}</div>
+              <div style={{ fontSize:9, fontFamily:"var(--font-mono)", color:"var(--text-sec)", opacity:0.55, letterSpacing:"0.08em", paddingLeft:4, borderLeft:"1px solid var(--border)", marginLeft:2, lineHeight:1.3 }}>
+                by<br/><span style={{ color:"var(--accent)", fontWeight:700, opacity:1, fontSize:10 }}>HumTere</span>
+              </div>
             </div>
             <div className="header-right">
               <div style={{ fontSize:10,fontFamily:"var(--font-mono)",color:"var(--text-sec)" }}>
@@ -4481,8 +4488,69 @@ function AppInner() {
         </div>
         {showAdmin&&<AdminPanel onClose={()=>{setShowAdmin(false);refreshQbase();}} onQbaseChange={refreshQbase} fetchContext={fetchContext} />}
         {showFetchWindow&&<PersistentFetchWindow fetchContext={fetchContext} onQbaseChange={refreshQbase} />}
+        <DonationWidget />
       </>
     </AppErrorBoundary>
+  );
+}
+
+// ─── DONATION WIDGET ──────────────────────────────────────────────────────────
+function DonationWidget() {
+  // WinRAR-style: always visible, never forceful, never goes away
+  const [dismissed, setDismissed] = useState(false);
+  const UPI = "+91 9818445078";
+
+  if (dismissed) return null;
+
+  return (
+    <div style={{
+      position: "fixed", bottom: 16, right: 16, zIndex: 8888,
+      width: 230,
+      background: "var(--surface, #121212)",
+      border: "1px solid var(--border, #27272A)",
+      borderRadius: "var(--r, 6px)",
+      padding: "11px 13px 10px",
+      boxShadow: "0 4px 24px rgba(0,0,0,0.55)",
+      fontFamily: "var(--font-mono, monospace)",
+    }}>
+      {/* WinRAR-style header */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom: 7 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-pri, #FAFAFA)", letterSpacing:"0.04em" }}>
+          ThreatPrep is free to use
+        </div>
+        <button onClick={() => setDismissed(true)} style={{
+          background:"none", border:"none", color:"var(--text-sec, #A1A1AA)",
+          cursor:"pointer", fontSize:14, lineHeight:1, padding:"0 2px",
+          fontFamily:"inherit",
+        }} title="Dismiss (for now)">×</button>
+      </div>
+
+      {/* The guilt paragraph */}
+      <div style={{ fontSize: 10, color: "var(--text-sec, #A1A1AA)", lineHeight: 1.65, marginBottom: 9 }}>
+        This tool is not free to build. If you passed, got shortlisted, or just found it useful — consider donating. You are not obligated to, but HumTere would really appreciate it.
+      </div>
+
+      {/* UPI box */}
+      <div style={{
+        background: "var(--elevated, #18181B)",
+        border: "1px solid var(--border, #27272A)",
+        borderRadius: "var(--r-sm, 4px)",
+        padding: "7px 10px",
+        marginBottom: 7,
+      }}>
+        <div style={{ fontSize: 9, color: "var(--text-sec, #A1A1AA)", letterSpacing: "0.1em", marginBottom: 3, textTransform:"uppercase" }}>
+          UPI · GPay / PhonePe / Paytm
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "var(--accent, #6366F1)", userSelect: "all", letterSpacing:"0.02em" }}>
+          {UPI}
+        </div>
+      </div>
+
+      {/* Remark line */}
+      <div style={{ fontSize: 9, color: "var(--text-sec, #A1A1AA)", opacity: 0.6, lineHeight: 1.5 }}>
+        Remark: <span style={{ color:"var(--text-pri,#FAFAFA)", opacity:0.75 }}>Donation for ThreatPrep by HumTere</span>
+      </div>
+    </div>
   );
 }
 
