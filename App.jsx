@@ -1,8 +1,16 @@
 // ─── BUILD METADATA ───────────────────────────────────────────────────────────
 // TOOL            : ThreatPrep — AI Exam Prep for Proofpoint Threat Protection Administrator
-// VERSION         : v5.0
-// BUILD           : 2026-04-14T00:00:00+05:30 (IST)
-// CHANGE          : v5.0: Gemini Key A hardcoded default removed (user key still accepted if set)
+// VERSION         : v5.1
+// BUILD           : 2026-04-14T18:23:21+05:30 (IST)
+// CHANGE          : v5.1: CRITICAL FIX — Batch boundary overflow in generateQuestions() retry loop
+//                         Bug 1: Retry loop was passing full original `count` to buildBasePrompt on
+//                                every attempt instead of `remainingNeeded = count - passedQuestions.length`
+//                                causing passedQuestions to accumulate across 3 attempts:
+//                                e.g. batchSize=9 → attempt0:5pass + attempt1:7pass + attempt2:4pass = 16Q
+//                         Bug 2: No hard cap on passedQuestions — results returned uncapped
+//                         Fix:  (a) compute remainingNeeded per attempt, early-break when target met
+//                               (b) passedQuestions.slice(0, count) hard cap before return
+//         v5.0: Gemini Key A hardcoded default removed (user key still accepted if set)
 //                         Key B (Claude Sonnet) switched from built-in artifact proxy → user-provided Anthropic API key
 //                         claudeGenerateRaw now requires x-api-key header from keys.keyB
 //                         APIKeysPage Key B section updated to show API key input field
@@ -1480,8 +1488,13 @@ async function generateQuestions({ domainIds, count, questionTypes }) {
   let positionACount = 0;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    // ── BOUNDARY GUARD: stop if we already have enough from a previous attempt ──
+    if (passedQuestions.length >= count) break;
+    const remainingNeeded = count - passedQuestions.length;
+
     // Build prompt — base on attempt 0, add reinforcement on retries
-    const basePrompt = buildBasePrompt({ domainList, count, typeInstruction });
+    // Pass remainingNeeded (not full count) so retries don't over-accumulate past batchSize
+    const basePrompt = buildBasePrompt({ domainList, count: remainingNeeded, typeInstruction });
     const reinforcement = attempt > 0
       ? buildRetryReinforcement(lastFailurePatterns, attempt)
       : "";
@@ -1584,6 +1597,9 @@ async function generateQuestions({ domainIds, count, questionTypes }) {
       localStorage.setItem("tpad01_pv_quarantine", JSON.stringify(merged));
     } catch {}
   }
+
+  // ── HARD CAP: never return more than the originally requested count ──
+  passedQuestions = passedQuestions.slice(0, count);
 
   return {
     results: passedQuestions,
