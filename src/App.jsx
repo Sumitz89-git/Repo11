@@ -1,8 +1,12 @@
 // ─── BUILD METADATA ───────────────────────────────────────────────────────────
 // TOOL            : ThreatPrep — AI Exam Prep for Proofpoint Threat Protection Administrator
-// VERSION         : v4.7
+// VERSION         : v4.9
 // BUILD           : 2026-04-14T00:00:00+05:30 (IST)
-// CHANGE          : v4.8: Supabase Auth Gate removed (local use — no auth required)
+// CHANGE          : v4.9: Supabase Auth Gate restored — Email/Password login + signup
+//                         AuthGate wraps App · session persisted via Supabase client
+//                         Header: user email display + Sign Out button
+//                         Env: import.meta.env VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY
+//                         Deploy: Vercel · npm @supabase/supabase-js (not CDN)
 // CERT            : Proofpoint Certified Threat Protection Administrator (TPAD01)
 // VENDOR          : Proofpoint
 // EXAM DETAILS    : ~60 Q · 90 min · $250 · 70% passing · 1yr validity · Certiverse platform
@@ -26,6 +30,225 @@
 import React, {
   useState, useEffect, useCallback, useRef, useMemo, Component,
 } from "react";
+
+// ─── SUPABASE CLIENT ─────────────────────────────────────────────────────────
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY,
+  { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }
+);
+
+// Shim so AuthProvider can call getSupabase() uniformly
+async function getSupabase() { return supabase; }
+
+// ─── AUTH CONTEXT ─────────────────────────────────────────────────────────────
+const AuthContext = React.createContext(null);
+function useAuth() { return React.useContext(AuthContext); }
+
+function AuthProvider({ children }) {
+  const [user, setUser]           = useState(undefined); // undefined = loading
+  const [initError, setInitError] = useState(null);
+
+  useEffect(() => {
+    let sub;
+    getSupabase().then(sb => {
+      sb.auth.getSession().then(({ data: { session } }) => {
+        setUser(session?.user ?? null);
+      });
+      const { data: listener } = sb.auth.onAuthStateChange((_event, session) => {
+        setUser(session?.user ?? null);
+      });
+      sub = listener;
+    }).catch(e => {
+      setInitError(e.message);
+      setUser(null);
+    });
+    return () => { sub?.subscription?.unsubscribe(); };
+  }, []);
+
+  const signIn = useCallback(async (email, password) => {
+    const sb = await getSupabase();
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+  }, []);
+
+  const signUp = useCallback(async (email, password) => {
+    const sb = await getSupabase();
+    const { error } = await sb.auth.signUp({ email, password });
+    if (error) throw error;
+  }, []);
+
+  const signOut = useCallback(async () => {
+    const sb = await getSupabase();
+    await sb.auth.signOut();
+  }, []);
+
+  return (
+    <AuthContext.Provider value={{ user, signIn, signUp, signOut, initError }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+// ─── AUTH GATE SCREEN ─────────────────────────────────────────────────────────
+function AuthGate() {
+  const { user, signIn, signUp, initError } = useAuth();
+  const [mode, setMode]       = useState("login"); // "login" | "signup"
+  const [email, setEmail]     = useState("");
+  const [password, setPass]   = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState(null);
+  const [notice, setNotice]   = useState(null);
+
+  // Apply default dark theme immediately
+  useEffect(() => { applyTheme(getTheme()); }, []);
+
+  if (user === undefined) {
+    // Still loading session
+    return (
+      <div style={{ position:"fixed", inset:0, display:"flex", alignItems:"center", justifyContent:"center",
+        background:"var(--bg,#0A0A0A)", color:"var(--text-sec,#A1A1AA)", fontFamily:"monospace", fontSize:13 }}>
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
+          <div style={{ width:28, height:28, border:"3px solid var(--border,#27272A)", borderTopColor:"var(--accent,#6366F1)",
+            borderRadius:"50%", animation:"spin 0.7s linear infinite" }} />
+          <span>Initialising…</span>
+        </div>
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      </div>
+    );
+  }
+
+  if (user) return null; // Authenticated — parent renders App
+
+  const handleSubmit = async () => {
+    setError(null); setNotice(null);
+    if (!email.trim() || !password) { setError("Email and password are required."); return; }
+    setLoading(true);
+    try {
+      if (mode === "login") {
+        await signIn(email.trim(), password);
+      } else {
+        await signUp(email.trim(), password);
+        setNotice("Account created! Check your email to confirm, then sign in.");
+        setMode("login");
+      }
+    } catch (e) {
+      setError(e.message || "Authentication failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const inputStyle = {
+    width:"100%", padding:"10px 12px", borderRadius:"var(--r,6px)",
+    border:"1px solid var(--border,#27272A)", background:"var(--elevated,#18181B)",
+    color:"var(--text-pri,#FAFAFA)", fontSize:14, fontFamily:"inherit",
+    outline:"none", boxSizing:"border-box",
+    transition:"border-color 0.15s",
+  };
+
+  return (
+    <div style={{ position:"fixed", inset:0, display:"flex", alignItems:"center", justifyContent:"center",
+      background:"var(--bg,#0A0A0A)", padding:"16px", fontFamily:"system-ui,sans-serif" }}>
+      <div style={{ width:"100%", maxWidth:360, background:"var(--surface,#121212)",
+        border:"1px solid var(--border,#27272A)", borderRadius:"var(--r,6px)",
+        padding:"28px 24px", boxShadow:"0 8px 40px rgba(0,0,0,0.5)" }}>
+
+        {/* Logo */}
+        <div style={{ textAlign:"center", marginBottom:24 }}>
+          <div style={{ fontSize:22, fontWeight:800, color:"var(--text-pri,#FAFAFA)", letterSpacing:"-0.5px" }}>
+            ThreatPrep
+          </div>
+          <div style={{ fontSize:11, color:"var(--text-sec,#A1A1AA)", marginTop:3, fontFamily:"monospace" }}>
+            AI Exam Prep · TPAD01
+          </div>
+        </div>
+
+        {/* Mode tabs */}
+        <div style={{ display:"flex", gap:4, marginBottom:20, background:"var(--elevated,#18181B)",
+          borderRadius:"var(--r-sm,4px)", padding:3 }}>
+          {["login","signup"].map(m => (
+            <button key={m} onClick={() => { setMode(m); setError(null); setNotice(null); }}
+              style={{ flex:1, padding:"7px", borderRadius:"var(--r-sm,4px)", border:"none", cursor:"pointer",
+                fontWeight:700, fontSize:12, fontFamily:"monospace", letterSpacing:"0.06em", textTransform:"uppercase",
+                background: mode===m ? "var(--accent,#6366F1)" : "transparent",
+                color: mode===m ? "#fff" : "var(--text-sec,#A1A1AA)",
+                transition:"all 0.15s" }}>
+              {m === "login" ? "Sign In" : "Sign Up"}
+            </button>
+          ))}
+        </div>
+
+        {/* Fields */}
+        <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:16 }}>
+          <input
+            type="email" placeholder="Email address" value={email}
+            onChange={e => setEmail(e.target.value)}
+            onKeyDown={e => e.key==="Enter" && handleSubmit()}
+            style={inputStyle}
+            autoComplete="email"
+          />
+          <input
+            type="password" placeholder="Password" value={password}
+            onChange={e => setPass(e.target.value)}
+            onKeyDown={e => e.key==="Enter" && handleSubmit()}
+            style={inputStyle}
+            autoComplete={mode==="login" ? "current-password" : "new-password"}
+          />
+        </div>
+
+        {/* Error / Notice */}
+        {error && (
+          <div style={{ background:"rgba(239,68,68,0.10)", border:"1px solid rgba(239,68,68,0.30)",
+            borderRadius:"var(--r-sm,4px)", padding:"8px 12px", color:"#f87171",
+            fontSize:12, marginBottom:12, lineHeight:1.5 }}>
+            {error}
+          </div>
+        )}
+        {notice && (
+          <div style={{ background:"rgba(52,211,153,0.10)", border:"1px solid rgba(52,211,153,0.30)",
+            borderRadius:"var(--r-sm,4px)", padding:"8px 12px", color:"#34d399",
+            fontSize:12, marginBottom:12, lineHeight:1.5 }}>
+            {notice}
+          </div>
+        )}
+        {initError && (
+          <div style={{ background:"rgba(239,68,68,0.10)", border:"1px solid rgba(239,68,68,0.30)",
+            borderRadius:"var(--r-sm,4px)", padding:"8px 12px", color:"#f87171",
+            fontSize:12, marginBottom:12, lineHeight:1.5 }}>
+            ⚠ Supabase init error: {initError}
+          </div>
+        )}
+
+        {/* Submit */}
+        <button onClick={handleSubmit} disabled={loading}
+          style={{ width:"100%", padding:"11px", borderRadius:"var(--r,6px)",
+            border:"none", background:"var(--accent,#6366F1)", color:"#fff",
+            fontWeight:700, fontSize:14, cursor: loading ? "not-allowed" : "pointer",
+            opacity: loading ? 0.7 : 1, fontFamily:"inherit",
+            display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+            transition:"opacity 0.15s" }}>
+          {loading && <span style={{ width:14, height:14, border:"2px solid rgba(255,255,255,0.4)",
+            borderTopColor:"#fff", borderRadius:"50%", display:"inline-block",
+            animation:"spin 0.7s linear infinite" }} />}
+          {mode === "login" ? "Sign In" : "Create Account"}
+        </button>
+
+        <div style={{ textAlign:"center", marginTop:16, fontSize:11, color:"var(--text-sec,#A1A1AA)", lineHeight:1.6 }}>
+          {mode === "login"
+            ? <>No account? <button onClick={()=>{setMode("signup");setError(null);setNotice(null);}}
+                style={{ background:"none", border:"none", color:"var(--accent,#6366F1)", cursor:"pointer", fontSize:11, fontWeight:600 }}>Sign up</button></>
+            : <>Already have one? <button onClick={()=>{setMode("login");setError(null);setNotice(null);}}
+                style={{ background:"none", border:"none", color:"var(--accent,#6366F1)", cursor:"pointer", fontSize:11, fontWeight:600 }}>Sign in</button></>
+          }
+        </div>
+      </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
 
 // ─── CRASH VISIBILITY ────────────────────────────────────────────────────────
 if (typeof window !== "undefined") {
@@ -4043,7 +4266,8 @@ Markdown table OR numbered process flow.`;
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
-export default function App() {
+function AppInner() {
+  const { user, signOut } = useAuth();
 
   const [screen, setScreen] = useState("start");
   const [qbaseCount, setQbaseCount] = useState(()=>QBase.getAll().length);
@@ -4184,6 +4408,19 @@ export default function App() {
               <ThemeSwitcher />
               <ZoomControl />
               <button className="btn btn-ghost btn-sm" onClick={()=>setShowAdmin(true)}>⚙ Admin</button>
+              {user && (
+                <div style={{ display:"flex", alignItems:"center", gap:6, borderLeft:"1px solid var(--border)", paddingLeft:8, marginLeft:2 }}>
+                  <span style={{ fontSize:10, fontFamily:"var(--font-mono)", color:"var(--text-sec)", maxWidth:100, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}
+                    title={user.email}>{user.email}</span>
+                  <button onClick={signOut}
+                    style={{ padding:"3px 8px", borderRadius:"var(--r-sm)", border:"1px solid var(--border)",
+                      background:"transparent", color:"var(--text-sec)", fontSize:10, fontFamily:"var(--font-mono)",
+                      cursor:"pointer", fontWeight:600, whiteSpace:"nowrap" }}
+                    title="Sign out">
+                    ⏻
+                  </button>
+                </div>
+              )}
             </div>
           </header>
           {appError&&(
@@ -4200,5 +4437,26 @@ export default function App() {
         {showFetchWindow&&<PersistentFetchWindow fetchContext={fetchContext} onQbaseChange={refreshQbase} />}
       </>
     </AppErrorBoundary>
+  );
+}
+
+// ─── ROOT EXPORT — Auth-gated ─────────────────────────────────────────────────
+export default function App() {
+  return (
+    <AuthProvider>
+      <AuthGateWrapper />
+    </AuthProvider>
+  );
+}
+
+function AuthGateWrapper() {
+  const { user } = useAuth();
+  return (
+    <>
+      {/* Show auth screen if not logged in */}
+      {!user && <AuthGate />}
+      {/* Show app once authenticated */}
+      {user && <AppInner />}
+    </>
   );
 }
